@@ -1,6 +1,13 @@
 # Clap Detection and Visualization System (MVP)
+    FA'25 Semester -- Robotics Practicum ISR
 
 This document outlines the Minimum Viable Product (MVP) for an IoT system designed to detect a loud audio event (a clap) on a remote sensor (Audio Node) and trigger a visual change on a centralized display (Visual Node) via an MQTT Broker (Master Node).
+
+
+## Learning Objectives
+One of my goals for this project was to reuse as much existing hardware and components I could find throughout the school. I had been rejected by a Zipline Embedded Software Co-op role for SP26 and immediately got to work ideating on projects. At the time, I couldn't decide what topics to focus on. Eventually, I landed on distributed systems with an emphasis on topics I've been meaning to dig deeper into--**DevOps, Embedded Systems, Self-Hosting/Security, and Full-Stack Software**. 
+
+I repurposed my highschool laptop to serve as my Master Node and to grow as a platform for future DevOps tools such as Terraform, Ansible, Grafana, Prometheus, and AWS S3. 
 
 ## 1. System Architecture: MQTT Pub/Sub
 
