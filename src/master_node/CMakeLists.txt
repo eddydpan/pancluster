@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.10)
 # Master Node executable
 add_executable(master_node
     # Add your source files here
-    # main.cpp
+    master_main.cpp
 )
 
 # Include directories
