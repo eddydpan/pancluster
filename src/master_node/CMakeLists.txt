@@ -9,8 +9,3 @@ add_executable(master_node
 target_include_directories(master_node PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
-
-# Link libraries
-target_link_libraries(master_node PRIVATE
-    discovery
-)

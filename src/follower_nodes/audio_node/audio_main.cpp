@@ -1,6 +1,5 @@
 #include <iostream>
 #include <mqtt/client.h>
-#include "../../common/discovery.h"
 
 const std::string CLIENT_ID = "OdroidAudioNodeClient";
 const std::string USERNAME = "ppaudionode";
@@ -29,15 +28,13 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    // Discover master node
-    std::cout << "Discovering master node..." << std::endl;
-    discovery::Discoverer discoverer;
-    std::string master_ip = discoverer.discover();
-    
-    if (master_ip.empty()) {
-        std::cerr << "Failed to discover master node. Exiting." << std::endl;
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <master_ip>" << std::endl;
         return 1;
     }
+    
+    std::string master_ip = argv[1];
+    std::cout << "Connecting to master at " << master_ip << std::endl;
     
     std::string SERVER_ADDRESS = "tcp://" + master_ip + ":1883";
     
