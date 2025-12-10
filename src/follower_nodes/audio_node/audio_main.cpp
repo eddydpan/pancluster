@@ -46,8 +46,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Connected. Client ID: " << CLIENT_ID << std::endl;
 
         // Subscribe to the test topic
-        std::cout << "Subscribing to topic: " << TEST_TOPIC << std::endl;
-        client.subscribe(TEST_TOPIC, 1);
+        std::cout << "Subscribing to topic: " << TOPIC << std::endl;
+        client.subscribe(TOPIC, 1);
 
         std::cout << "Successfully subscribed. Waiting for messages..." << std::endl;
         std::cout << "Press Ctrl+C to exit." << std::endl;
