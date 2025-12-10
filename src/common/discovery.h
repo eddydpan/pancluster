@@ -11,10 +11,10 @@
 
 namespace discovery {
 
-const int DISCOVERY_PORT = 8888;
-const char* DISCOVERY_MESSAGE = "PANCLUSTER_MASTER";
-const int MAX_RETRIES = 5;
-const int TIMEOUT_SECONDS = 2;
+constexpr int DISCOVERY_PORT = 8888;
+inline const char* DISCOVERY_MESSAGE = "PANCLUSTER_MASTER";
+constexpr int MAX_RETRIES = 5;
+constexpr int TIMEOUT_SECONDS = 2;
 
 // Broadcast master node IP address
 class Broadcaster {

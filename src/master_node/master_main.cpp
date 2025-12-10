@@ -6,7 +6,7 @@
 
 volatile sig_atomic_t stop_flag = 0;
 
-void signal_handler(int signal) {
+void signal_handler(int) {
     stop_flag = 1;
 }
 
