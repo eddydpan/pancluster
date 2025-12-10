@@ -17,4 +17,8 @@ target_include_directories(discovery PUBLIC
 
 # Add subdirectories
 add_subdirectory(master_node)
-add_subdirectory(follower_nodes)
+
+# Only build follower nodes if requested
+if(BUILD_FOLLOWER_NODES)
+    add_subdirectory(follower_nodes)
+endif()

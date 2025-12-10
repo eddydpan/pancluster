@@ -8,6 +8,27 @@ Project planning document for a home-automation distributed systems project
 
 </aside>
 
+## Build Instructions
+
+### Master Node
+The master node only needs to build the broadcaster for UDP discovery:
+```bash
+cmake -B build
+cmake --build build
+./build/src/master_node/master_node
+```
+
+### Follower Nodes (Audio/Visual)
+Follower nodes require MQTT libraries and build with the discovery client:
+```bash
+cmake -B build -DBUILD_FOLLOWER_NODES=ON
+cmake --build build
+./build/src/follower_nodes/audio_node/audio_node
+```
+
+### Discovery Protocol
+The system uses UDP broadcast (port 8888) for automatic master node discovery. The master broadcasts its presence every second, and follower nodes listen for these broadcasts to automatically discover the master's IP address, eliminating the need for manual configuration or static IPs with DHCP.
+
 ## Learning Goals
 
 - [ ]  Gain experience working with distributed systems by building one up from scratch
