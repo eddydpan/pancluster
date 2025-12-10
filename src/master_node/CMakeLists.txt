@@ -1,9 +1,7 @@
 # Master Node
-cmake_minimum_required(VERSION 3.10)
 
 # Master Node executable
 add_executable(master_node
-    # Add your source files here
     master_main.cpp
 )
 
@@ -13,6 +11,6 @@ target_include_directories(master_node PRIVATE
 )
 
 # Link libraries
-# target_link_libraries(master_node PRIVATE
-#     # Add your libraries here
-# )
+target_link_libraries(master_node PRIVATE
+    discovery
+)

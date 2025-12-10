@@ -15,5 +15,6 @@ find_package(PahoMqttCpp REQUIRED)
 
 # Link the executable against the libraries
 target_link_libraries(audio_node PRIVATE 
+    discovery
     PahoMqttCpp::paho-mqttpp3
 )
