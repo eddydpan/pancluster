@@ -10,17 +10,21 @@
 
 #define SAMPLE_RATE 44100
 #define FRAMES_PER_BUFFER 2048
-#define CLAP_THRESHOLD 0.27f // Increased threshold for noisy cheap microphones
+#define CLAP_THRESHOLD 0.015f // Lowered for extremely quiet USB mic
 #define MIN_CLAP_GAP_MS 100 // Minimum gap between claps (ms)
 #define MAX_CLAP_GAP_MS 800 // Maximum gap between claps (ms)
-#define SILENCE_THRESHOLD 0.12f // Threshold for silence detection
+#define SILENCE_THRESHOLD 0.008f // Lowered for quiet mic
+#define CLAP_MULTIPLIER 5.0f // Clap should be 5x louder than ambient noise
 
 const std::string CLIENT_ID("AudioNodePublisher");
 const std::string USERNAME("ppaudionode");
 const std::string PASSWORD("audio");
 const std::string TOPIC("commands/light");
 
-// Single clap detection function
+// Global ambient noise level (updated during operation)
+float g_ambientNoiseLevel = 0.005f;
+
+// Single clap detection function with adaptive threshold
 bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& peakAmplitude) {
     PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
     if (err == paInputOverflowed) {
@@ -40,7 +44,12 @@ bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& pea
     }
 
     peakAmplitude = maxAmplitude;
-    return maxAmplitude > CLAP_THRESHOLD;
+    
+    // Use BOTH absolute threshold AND relative threshold (must exceed both)
+    bool exceedsAbsolute = maxAmplitude > CLAP_THRESHOLD;
+    bool exceedsRelative = maxAmplitude > (g_ambientNoiseLevel * CLAP_MULTIPLIER);
+    
+    return exceedsAbsolute && exceedsRelative;
 }
 
 // Double-clap detection function with timing constraints
@@ -225,13 +234,17 @@ int main(int argc, char* argv[]) {
         }
         
         avgNoise /= noiseCount;
+        g_ambientNoiseLevel = avgNoise; // Set global ambient level
         std::cout << "   Noise floor: min=" << minNoise << ", avg=" << avgNoise << ", max=" << maxNoise << std::endl;
+        std::cout << "   (Ambient noise level set to: " << g_ambientNoiseLevel << ")" << std::endl;
         
         std::cout << "\nStep 2: Clap detection test for 15 seconds..." << std::endl;
         std::cout << "        (Clap normally near the microphone)" << std::endl;
+        std::cout << "        Real-time levels will be shown below:\n" << std::endl;
         
         float maxClapSeen = 0.0f;
         int clapCount = 0;
+        int sampleCount = 0;
         startTime = std::chrono::steady_clock::now();
         
         while (std::chrono::duration_cast<std::chrono::seconds>(
@@ -246,21 +259,25 @@ int main(int argc, char* argv[]) {
                 if (absSample > maxAmp) maxAmp = absSample;
             }
             
-            // Show any significant peaks
-            if (maxAmp > avgNoise * 2) {
-                std::cout << "   Peak detected: " << maxAmp;
+            // Show ALL levels in real-time, not just peaks
+            if (sampleCount++ % 20 == 0) {  // Every ~1 second
+                std::cout << "   Current level: " << maxAmp;
                 if (maxAmp > CLAP_THRESHOLD) {
                     std::cout << " [ABOVE THRESHOLD]";
-                    clapCount++;
-                } else {
-                    std::cout << " [below threshold]";
+                } else if (maxAmp > avgNoise * 3) {
+                    std::cout << " [sound detected]";
                 }
                 std::cout << std::endl;
-                
-                if (maxAmp > maxClapSeen) maxClapSeen = maxAmp;
-                std::this_thread::sleep_for(std::chrono::milliseconds(200)); // Debounce
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            
+            // Track significant peaks
+            if (maxAmp > avgNoise * 2) {
+                if (maxAmp > CLAP_THRESHOLD) {
+                    clapCount++;
+                }
+                if (maxAmp > maxClapSeen) maxClapSeen = maxAmp;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         
         std::cout << "\n========== CALIBRATION RESULTS ==========" << std::endl;
@@ -270,17 +287,25 @@ int main(int argc, char* argv[]) {
         std::cout << "\nCurrent settings:" << std::endl;
         std::cout << "  CLAP_THRESHOLD = " << CLAP_THRESHOLD << std::endl;
         std::cout << "  SILENCE_THRESHOLD = " << SILENCE_THRESHOLD << std::endl;
+        std::cout << "  CLAP_MULTIPLIER = " << CLAP_MULTIPLIER << "x (clap must be " << CLAP_MULTIPLIER << "x louder than ambient)" << std::endl;
         std::cout << "\nRecommended settings:" << std::endl;
         
-        float recommendedClap = maxClapSeen * 0.7f; // 70% of max clap seen
-        float recommendedSilence = avgNoise + (maxNoise - avgNoise) * 1.5f; // Above noise floor
+        float recommendedClap = maxClapSeen * 0.6f; // 60% of max clap seen
+        float recommendedSilence = avgNoise + (maxNoise - avgNoise) * 2.0f; // Well above noise floor
+        float recommendedMultiplier = maxClapSeen > 0 ? (maxClapSeen / avgNoise) * 0.7f : 5.0f;
         
         std::cout << "  CLAP_THRESHOLD = " << recommendedClap << "f" << std::endl;
         std::cout << "  SILENCE_THRESHOLD = " << recommendedSilence << "f" << std::endl;
+        std::cout << "  CLAP_MULTIPLIER = " << recommendedMultiplier << "f" << std::endl;
         
-        if (avgNoise > 0.05f) {
-            std::cout << "\n⚠ WARNING: High ambient noise detected!" << std::endl;
-            std::cout << "  Consider moving to a quieter location or using a better microphone." << std::endl;
+        if (maxClapSeen > 0) {
+            std::cout << "\n✓ Claps detected! Ratio: " << (maxClapSeen / avgNoise) << "x louder than ambient" << std::endl;
+        } else {
+            std::cout << "\n✗ NO CLAPS DETECTED!" << std::endl;
+            std::cout << "  Your microphone may be too quiet or defective." << std::endl;
+            std::cout << "  Try: 1) A different USB mic with gain control" << std::endl;
+            std::cout << "       2) A USB audio interface with XLR input" << std::endl;
+            std::cout << "       3) Speaking/clapping VERY close to the mic" << std::endl;
         }
         
         std::cout << "\nEdit the #define values in audio_main.cpp and rebuild." << std::endl;
