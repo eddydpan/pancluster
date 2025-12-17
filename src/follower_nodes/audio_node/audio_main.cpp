@@ -10,10 +10,10 @@
 
 #define SAMPLE_RATE 44100
 #define FRAMES_PER_BUFFER 2048
-#define CLAP_THRESHOLD 1.15f // Increased threshold for noisy cheap microphones
+#define CLAP_THRESHOLD 0.32f // Increased threshold for noisy cheap microphones
 #define MIN_CLAP_GAP_MS 100 // Minimum gap between claps (ms)
 #define MAX_CLAP_GAP_MS 800 // Maximum gap between claps (ms)
-#define SILENCE_THRESHOLD 0.6f // Threshold for silence detection
+#define SILENCE_THRESHOLD 0.12f // Threshold for silence detection
 
 const std::string CLIENT_ID("AudioNodePublisher");
 const std::string USERNAME("ppaudionode");
