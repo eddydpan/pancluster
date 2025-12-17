@@ -131,12 +131,45 @@ int main(int argc, char* argv[]) {
     }
 
     PaStreamParameters inputParams;
-    inputParams.device = Pa_GetDefaultInputDevice();
+    
+    // List all available devices
+    int numDevices = Pa_GetDeviceCount();
+    std::cout << "Available audio devices:" << std::endl;
+    for (int i = 0; i < numDevices; i++) {
+        const PaDeviceInfo* info = Pa_GetDeviceInfo(i);
+        if (info->maxInputChannels > 0) {
+            std::cout << "  [" << i << "] " << info->name 
+                      << " (inputs: " << info->maxInputChannels << ")" << std::endl;
+        }
+    }
+    
+    // Try to find USB audio device, otherwise use default
+    int selectedDevice = Pa_GetDefaultInputDevice();
+    for (int i = 0; i < numDevices; i++) {
+        const PaDeviceInfo* info = Pa_GetDeviceInfo(i);
+        std::string devName = info->name;
+        // Look for USB audio device
+        if (info->maxInputChannels > 0 && 
+            (devName.find("USB") != std::string::npos || 
+             devName.find("PnP") != std::string::npos)) {
+            selectedDevice = i;
+            std::cout << "Auto-selected USB device: " << devName << std::endl;
+            break;
+        }
+    }
+    
+    inputParams.device = selectedDevice;
     if (inputParams.device == paNoDevice) {
         std::cerr << "No default input device found" << std::endl;
         Pa_Terminate();
         return 1;
     }
+    
+    // Print which device is being used
+    const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(inputParams.device);
+    std::cout << "Using audio device: " << deviceInfo->name << " (device #" << inputParams.device << ")" << std::endl;
+    std::cout << "Max input channels: " << deviceInfo->maxInputChannels << std::endl;
+    
     inputParams.channelCount = 1;
     inputParams.sampleFormat = paFloat32;
     inputParams.suggestedLatency = Pa_GetDeviceInfo(inputParams.device)->defaultLowInputLatency;
