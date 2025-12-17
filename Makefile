@@ -11,7 +11,7 @@ clean:
 	rm -rf build/*
 
 master:
-	cd build && cmake .. && make master_node -j4
+	cd build && cmake -DBUILD_FOLLOWER_NODES=OFF .. && make master_node -j4
 
 audio:
 	cd build && cmake -DBUILD_FOLLOWER_NODES=ON .. && make audio_node -j4

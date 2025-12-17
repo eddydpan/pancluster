@@ -9,8 +9,8 @@
 #include <portaudio.h>
 
 #define SAMPLE_RATE 44100
-#define FRAMES_PER_BUFFER 512
-#define CLAP_THRESHOLD 1.1f // Increased threshold for noisy cheap microphones
+#define FRAMES_PER_BUFFER 2048
+#define CLAP_THRESHOLD 1.15f // Increased threshold for noisy cheap microphones
 #define MIN_CLAP_GAP_MS 100 // Minimum gap between claps (ms)
 #define MAX_CLAP_GAP_MS 800 // Maximum gap between claps (ms)
 #define SILENCE_THRESHOLD 0.6f // Threshold for silence detection
@@ -23,6 +23,10 @@ const std::string TOPIC("commands/light");
 // Single clap detection function
 bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& peakAmplitude) {
     PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
+    if (err == paInputOverflowed) {
+        // Skip buffer data if overflowed
+        return false;
+    }
     if (err != paNoError) {
         std::cerr << "PortAudio read error: " << Pa_GetErrorText(err) << std::endl;
         return false;
@@ -50,6 +54,8 @@ bool detect_double_clap(PaStream* stream, std::vector<float>& buffer) {
             std::cout << "First clap detected! (Peak: " << peakAmplitude << ")" << std::endl;
             break;
         }
+        // Small sleep to prevent tight loop CPU usage
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     
     auto firstClapTime = steady_clock::now();
@@ -58,6 +64,7 @@ bool detect_double_clap(PaStream* stream, std::vector<float>& buffer) {
     bool silenceDetected = false;
     while (!silenceDetected) {
         PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
+        if (err == paInputOverflowed) continue; // Skip overflowed buffers
         if (err != paNoError) return false;
         
         float maxAmplitude = 0.0f;
@@ -90,6 +97,9 @@ bool detect_double_clap(PaStream* stream, std::vector<float>& buffer) {
             std::cout << "Second clap detected! (Peak: " << peakAmplitude << ", Gap: " << elapsed << "ms)" << std::endl;
             return true;
         }
+        
+        // Small sleep to prevent tight loop
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     
     return false;
@@ -163,10 +173,10 @@ int main(int argc, char* argv[]) {
                 std::string payload = "{\"action\":\"toggle\",\"source\":\"double_clap\"}";
                 mqtt::message_ptr pubmsg = mqtt::make_message(TOPIC, payload, 1, false);
                 client.publish(pubmsg)->wait();
-                std::cout << "[DOUBLE CLAP DETECTED] Published to " << TOPIC << ": " << payload << std::endl;
+                std::cout << "[DOUBLE CLAP] Published command" << std::endl;
                 
                 // Add cooldown to prevent immediate re-triggering
-                std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
         }
 
