@@ -106,11 +106,13 @@ bool detect_double_clap(PaStream* stream, std::vector<float>& buffer) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <master_ip>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <master_ip> [calibrate]" << std::endl;
+        std::cerr << "  Add 'calibrate' to run calibration mode" << std::endl;
         return 1;
     }
     
     std::string master_ip = argv[1];
+    bool calibrationMode = (argc > 2 && std::string(argv[2]) == "calibrate");
     std::string SERVER_ADDRESS = "tcp://" + master_ip + ":1883";
     
     mqtt::async_client client(SERVER_ADDRESS, CLIENT_ID);
@@ -160,6 +162,104 @@ int main(int argc, char* argv[]) {
     std::vector<float> buffer(FRAMES_PER_BUFFER);
     std::cout << "PortAudio initialized successfully" << std::endl;
 
+    // CALIBRATION MODE
+    if (calibrationMode) {
+        std::cout << "\n========== CALIBRATION MODE ==========" << std::endl;
+        std::cout << "Step 1: Measuring ambient noise for 5 seconds..." << std::endl;
+        std::cout << "        (Stay quiet)" << std::endl;
+        
+        float minNoise = 1.0f, maxNoise = 0.0f, avgNoise = 0.0f;
+        int noiseCount = 0;
+        auto startTime = std::chrono::steady_clock::now();
+        
+        while (std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - startTime).count() < 5) {
+            PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
+            if (err == paInputOverflowed) continue;
+            if (err != paNoError) break;
+            
+            float maxAmp = 0.0f;
+            for (float sample : buffer) {
+                float absSample = std::abs(sample);
+                if (absSample > maxAmp) maxAmp = absSample;
+            }
+            
+            if (maxAmp < minNoise) minNoise = maxAmp;
+            if (maxAmp > maxNoise) maxNoise = maxAmp;
+            avgNoise += maxAmp;
+            noiseCount++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        
+        avgNoise /= noiseCount;
+        std::cout << "   Noise floor: min=" << minNoise << ", avg=" << avgNoise << ", max=" << maxNoise << std::endl;
+        
+        std::cout << "\nStep 2: Clap detection test for 15 seconds..." << std::endl;
+        std::cout << "        (Clap normally near the microphone)" << std::endl;
+        
+        float maxClapSeen = 0.0f;
+        int clapCount = 0;
+        startTime = std::chrono::steady_clock::now();
+        
+        while (std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - startTime).count() < 15) {
+            PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
+            if (err == paInputOverflowed) continue;
+            if (err != paNoError) break;
+            
+            float maxAmp = 0.0f;
+            for (float sample : buffer) {
+                float absSample = std::abs(sample);
+                if (absSample > maxAmp) maxAmp = absSample;
+            }
+            
+            // Show any significant peaks
+            if (maxAmp > avgNoise * 2) {
+                std::cout << "   Peak detected: " << maxAmp;
+                if (maxAmp > CLAP_THRESHOLD) {
+                    std::cout << " [ABOVE THRESHOLD]";
+                    clapCount++;
+                } else {
+                    std::cout << " [below threshold]";
+                }
+                std::cout << std::endl;
+                
+                if (maxAmp > maxClapSeen) maxClapSeen = maxAmp;
+                std::this_thread::sleep_for(std::chrono::milliseconds(200)); // Debounce
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        
+        std::cout << "\n========== CALIBRATION RESULTS ==========" << std::endl;
+        std::cout << "Ambient noise level: " << avgNoise << " (range: " << minNoise << " - " << maxNoise << ")" << std::endl;
+        std::cout << "Highest clap seen: " << maxClapSeen << std::endl;
+        std::cout << "Claps above threshold: " << clapCount << std::endl;
+        std::cout << "\nCurrent settings:" << std::endl;
+        std::cout << "  CLAP_THRESHOLD = " << CLAP_THRESHOLD << std::endl;
+        std::cout << "  SILENCE_THRESHOLD = " << SILENCE_THRESHOLD << std::endl;
+        std::cout << "\nRecommended settings:" << std::endl;
+        
+        float recommendedClap = maxClapSeen * 0.7f; // 70% of max clap seen
+        float recommendedSilence = avgNoise + (maxNoise - avgNoise) * 1.5f; // Above noise floor
+        
+        std::cout << "  CLAP_THRESHOLD = " << recommendedClap << "f" << std::endl;
+        std::cout << "  SILENCE_THRESHOLD = " << recommendedSilence << "f" << std::endl;
+        
+        if (avgNoise > 0.05f) {
+            std::cout << "\n⚠ WARNING: High ambient noise detected!" << std::endl;
+            std::cout << "  Consider moving to a quieter location or using a better microphone." << std::endl;
+        }
+        
+        std::cout << "\nEdit the #define values in audio_main.cpp and rebuild." << std::endl;
+        std::cout << "========================================\n" << std::endl;
+        
+        Pa_StopStream(stream);
+        Pa_CloseStream(stream);
+        Pa_Terminate();
+        return 0;
+    }
+
+    // NORMAL MODE
     try {
         std::cout << "Audio Node connecting to broker at " << SERVER_ADDRESS << "..." << std::endl;
         client.connect(connOpts)->wait();
