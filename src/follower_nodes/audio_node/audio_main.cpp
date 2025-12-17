@@ -21,7 +21,7 @@ const std::string PASSWORD("audio");
 const std::string TOPIC("commands/light");
 
 // Single clap detection function
-bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& peakAmplitude) {
+bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& peakAmplitude, bool debug = false) {
     PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
     if (err == paInputOverflowed) {
         // Skip buffer data if overflowed
@@ -40,6 +40,12 @@ bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& pea
     }
 
     peakAmplitude = maxAmplitude;
+    
+    // Debug output to see actual levels
+    if (debug && maxAmplitude > 0.05f) {
+        std::cout << "Audio level: " << maxAmplitude << " (threshold: " << CLAP_THRESHOLD << ")" << std::endl;
+    }
+    
     return maxAmplitude > CLAP_THRESHOLD;
 }
 
@@ -160,6 +166,12 @@ int main(int argc, char* argv[]) {
 
     std::vector<float> buffer(FRAMES_PER_BUFFER);
     std::cout << "PortAudio initialized successfully" << std::endl;
+    
+    // Print device info for debugging
+    const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(inputParams.device);
+    std::cout << "Using input device: " << deviceInfo->name << std::endl;
+    std::cout << "Max input channels: " << deviceInfo->maxInputChannels << std::endl;
+    std::cout << "Default sample rate: " << deviceInfo->defaultSampleRate << std::endl;
 
     try {
         std::cout << "Audio Node connecting to broker at " << SERVER_ADDRESS << "..." << std::endl;
@@ -167,6 +179,21 @@ int main(int argc, char* argv[]) {
         std::cout << "Connected to MQTT broker" << std::endl;
         std::cout << "Listening for DOUBLE claps. Press Ctrl+C to exit." << std::endl;
         std::cout << "Clap twice within " << MAX_CLAP_GAP_MS << "ms to trigger." << std::endl;
+        
+        // DEBUG MODE: Show audio levels for first 10 seconds
+        std::cout << "\n=== DEBUG MODE: Showing audio levels for 10 seconds ===" << std::endl;
+        std::cout << "Make some noise near the microphone..." << std::endl;
+        auto debugStart = std::chrono::steady_clock::now();
+        float peakAmplitude = 0.0f;
+        
+        while (std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - debugStart).count() < 10) {
+            detect_single_clap(stream, buffer, peakAmplitude, true);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        
+        std::cout << "=== DEBUG MODE ENDED - Starting clap detection ===" << std::endl;
+        std::cout << "Current threshold: " << CLAP_THRESHOLD << std::endl << std::endl;
         
         while (true) {
             if (detect_double_clap(stream, buffer)) {
