@@ -1,6 +1,8 @@
 #include <mqtt/async_client.h>
 #include <string>
 #include <iostream>
+#include <chrono>
+#include <thread>
 
 const std::string SERVER_ADDRESS("tcp://localhost:1883");
 const std::string CLIENT_ID("cpp_publisher");
@@ -20,15 +22,22 @@ int main() {
     try {
         // Connect to EMQX broker
         client.connect(connOpts)->wait();
-        std::cout << "Connected to EMQX broker" << std::endl;
+        std::cout << "Connected to MQTT broker" << std::endl;
 
-        // Publish a message
-        std::string payload = "Hello, EMQX from C++!";
-        mqtt::message_ptr pubmsg = mqtt::make_message(TOPIC, payload, 1, false);
-        client.publish(pubmsg)->wait();
-        std::cout << "Message published: " << payload << std::endl;
+        // Publish messages continuously
+        int message_count = 0;
+        std::cout << "Publishing messages every 5 seconds. Press Ctrl+C to exit." << std::endl;
+        
+        while (true) {
+            std::string payload = "Hello from Master #" + std::to_string(message_count++);
+            mqtt::message_ptr pubmsg = mqtt::make_message(TOPIC, payload, 1, false);
+            client.publish(pubmsg)->wait();
+            std::cout << "Message published: " << payload << std::endl;
+            
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
 
-        // Disconnect
+        // Disconnect (unreachable, but good practice)
         client.disconnect()->wait();
         std::cout << "Disconnected" << std::endl;
     } catch (const mqtt::exception& exc) {
