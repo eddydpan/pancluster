@@ -1,31 +1,99 @@
+#include <vector>
+#include <cmath>
+#include <string>
 #include <iostream>
-#include <mqtt/client.h>
+#include <chrono>
+#include <thread>
+#include <mqtt/async_client.h>
 
-const std::string CLIENT_ID = "OdroidAudioNodeClient";
-const std::string USERNAME = "ppaudionode";
-const std::string PASSWORD = "audio";
-const std::string TOPIC = "test/topic";
-const std::string PAYLOAD = "Hello from C++ MQTT!";
+#include <portaudio.h>
 
-// Simple class to handle incoming messages
-class action_listener : public virtual mqtt::callback {
-public:
-    void connection_lost(const std::string& cause) override {
-        std::cout << "\nConnection lost: " << (cause.empty() ? "No Reason" : cause) << std::endl;
+#define SAMPLE_RATE 44100
+#define FRAMES_PER_BUFFER 512
+#define CLAP_THRESHOLD 1.1f // Increased threshold for noisy cheap microphones
+#define MIN_CLAP_GAP_MS 100 // Minimum gap between claps (ms)
+#define MAX_CLAP_GAP_MS 800 // Maximum gap between claps (ms)
+#define SILENCE_THRESHOLD 0.6f // Threshold for silence detection
+
+const std::string CLIENT_ID("AudioNodePublisher");
+const std::string USERNAME("ppaudionode");
+const std::string PASSWORD("audio");
+const std::string TOPIC("commands/light");
+
+// Single clap detection function
+bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& peakAmplitude) {
+    PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
+    if (err != paNoError) {
+        std::cerr << "PortAudio read error: " << Pa_GetErrorText(err) << std::endl;
+        return false;
     }
 
-    void message_arrived(mqtt::const_message_ptr msg) override {
-        std::cout << "------------------------------------------" << std::endl;
-        std::cout << "TOPIC: " << msg->get_topic() << std::endl;
-        std::cout << "PAYLOAD: " << msg->to_string() << std::endl;
-        std::cout << "QoS: " << msg->get_qos() << std::endl;
-        std::cout << "------------------------------------------" << std::endl;
+    // Simple Peak Detection for Clap
+    float maxAmplitude = 0.0f;
+    for (float sample : buffer) {
+        float absSample = std::abs(sample);
+        if (absSample > maxAmplitude) maxAmplitude = absSample;
     }
 
-    void delivery_complete(mqtt::delivery_token_ptr tok) override {
-        // Not used for subscribers, but required by interface
+    peakAmplitude = maxAmplitude;
+    return maxAmplitude > CLAP_THRESHOLD;
+}
+
+// Double-clap detection function with timing constraints
+bool detect_double_clap(PaStream* stream, std::vector<float>& buffer) {
+    using namespace std::chrono;
+    float peakAmplitude = 0.0f;
+    
+    // Wait for first clap
+    while (true) {
+        if (detect_single_clap(stream, buffer, peakAmplitude)) {
+            std::cout << "First clap detected! (Peak: " << peakAmplitude << ")" << std::endl;
+            break;
+        }
     }
-};
+    
+    auto firstClapTime = steady_clock::now();
+    
+    // Wait for silence (avoid counting echoes/reverb)
+    bool silenceDetected = false;
+    while (!silenceDetected) {
+        PaError err = Pa_ReadStream(stream, buffer.data(), FRAMES_PER_BUFFER);
+        if (err != paNoError) return false;
+        
+        float maxAmplitude = 0.0f;
+        for (float sample : buffer) {
+            float absSample = std::abs(sample);
+            if (absSample > maxAmplitude) maxAmplitude = absSample;
+        }
+        
+        if (maxAmplitude < SILENCE_THRESHOLD) {
+            silenceDetected = true;
+        }
+        
+        // Timeout if silence takes too long
+        auto elapsed = duration_cast<milliseconds>(steady_clock::now() - firstClapTime).count();
+        if (elapsed > MIN_CLAP_GAP_MS) {
+            silenceDetected = true;
+        }
+    }
+    
+    // Look for second clap within time window
+    while (true) {
+        auto elapsed = duration_cast<milliseconds>(steady_clock::now() - firstClapTime).count();
+        
+        if (elapsed > MAX_CLAP_GAP_MS) {
+            std::cout << "Second clap timeout (waited " << elapsed << "ms)" << std::endl;
+            return false;
+        }
+        
+        if (detect_single_clap(stream, buffer, peakAmplitude)) {
+            std::cout << "Second clap detected! (Peak: " << peakAmplitude << ", Gap: " << elapsed << "ms)" << std::endl;
+            return true;
+        }
+    }
+    
+    return false;
+}
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -34,42 +102,86 @@ int main(int argc, char* argv[]) {
     }
     
     std::string master_ip = argv[1];
-    std::cout << "Connecting to master at " << master_ip << std::endl;
-    
     std::string SERVER_ADDRESS = "tcp://" + master_ip + ":1883";
     
-    mqtt::client client(SERVER_ADDRESS, CLIENT_ID);
-    mqtt::connect_options connOpts;
+    mqtt::async_client client(SERVER_ADDRESS, CLIENT_ID);
 
-    // Set Authentication Options
+    mqtt::connect_options connOpts;
+    connOpts.set_keep_alive_interval(20);
+    connOpts.set_clean_session(true);
     connOpts.set_user_name(USERNAME);
     connOpts.set_password(PASSWORD);
 
-    // Set the callback handler
-    action_listener listener;
-    client.set_callback(listener);
-
-    try {
-        std::cout << "Connecting to secured broker at " << SERVER_ADDRESS << "..." << std::endl;
-        client.connect(connOpts);
-        std::cout << "Connected. Client ID: " << CLIENT_ID << std::endl;
-
-        // Subscribe to the test topic
-        std::cout << "Subscribing to topic: " << TOPIC << std::endl;
-        client.subscribe(TOPIC, 1);
-
-        std::cout << "Successfully subscribed. Waiting for messages..." << std::endl;
-        std::cout << "Press Ctrl+C to exit." << std::endl;
-
-        // Keep the main thread alive to allow the client to receive messages
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-
-    } catch (const mqtt::exception& exc) {
-        std::cerr << "MQTT Error: " << exc.what() << std::endl;
+    // PortAudio initialization
+    PaError err = Pa_Initialize();
+    if (err != paNoError) {
+        std::cerr << "PortAudio initialization failed: " << Pa_GetErrorText(err) << std::endl;
         return 1;
     }
 
+    PaStreamParameters inputParams;
+    inputParams.device = Pa_GetDefaultInputDevice();
+    if (inputParams.device == paNoDevice) {
+        std::cerr << "No default input device found" << std::endl;
+        Pa_Terminate();
+        return 1;
+    }
+    inputParams.channelCount = 1;
+    inputParams.sampleFormat = paFloat32;
+    inputParams.suggestedLatency = Pa_GetDeviceInfo(inputParams.device)->defaultLowInputLatency;
+    inputParams.hostApiSpecificStreamInfo = NULL;
+
+    PaStream* stream;
+    // Passing NULL for the callback enables blocking I/O (polling)
+    err = Pa_OpenStream(&stream, &inputParams, NULL, SAMPLE_RATE, FRAMES_PER_BUFFER, paClipOff, NULL, NULL);
+    if (err != paNoError) {
+        std::cerr << "Failed to open stream: " << Pa_GetErrorText(err) << std::endl;
+        Pa_Terminate();
+        return 1;
+    }
+    
+    err = Pa_StartStream(stream);
+    if (err != paNoError) {
+        std::cerr << "Failed to start stream: " << Pa_GetErrorText(err) << std::endl;
+        Pa_CloseStream(stream);
+        Pa_Terminate();
+        return 1;
+    }
+
+    std::vector<float> buffer(FRAMES_PER_BUFFER);
+    std::cout << "PortAudio initialized successfully" << std::endl;
+
+    try {
+        std::cout << "Audio Node connecting to broker at " << SERVER_ADDRESS << "..." << std::endl;
+        client.connect(connOpts)->wait();
+        std::cout << "Connected to MQTT broker" << std::endl;
+        std::cout << "Listening for DOUBLE claps. Press Ctrl+C to exit." << std::endl;
+        std::cout << "Clap twice within " << MAX_CLAP_GAP_MS << "ms to trigger." << std::endl;
+        
+        while (true) {
+            if (detect_double_clap(stream, buffer)) {
+                std::string payload = "{\"action\":\"toggle\",\"source\":\"double_clap\"}";
+                mqtt::message_ptr pubmsg = mqtt::make_message(TOPIC, payload, 1, false);
+                client.publish(pubmsg)->wait();
+                std::cout << "[DOUBLE CLAP DETECTED] Published to " << TOPIC << ": " << payload << std::endl;
+                
+                // Add cooldown to prevent immediate re-triggering
+                std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+            }
+        }
+
+        client.disconnect()->wait();
+        std::cout << "Disconnected" << std::endl;
+    } catch (const mqtt::exception& exc) {
+        std::cerr << "MQTT Error: " << exc.what() << std::endl;
+        Pa_StopStream(stream);
+        Pa_CloseStream(stream);
+        Pa_Terminate();
+        return 1;
+    }
+
+    Pa_StopStream(stream);
+    Pa_CloseStream(stream);
+    Pa_Terminate();
     return 0;
 }
