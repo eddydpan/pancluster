@@ -1,47 +1,62 @@
-#include <mqtt/async_client.h>
-#include <string>
 #include <iostream>
-#include <chrono>
-#include <thread>
+#include <mqtt/client.h>
 
-const std::string SERVER_ADDRESS("tcp://localhost:1883");
-const std::string CLIENT_ID("cpp_publisher");
-const std::string USERNAME("ppmaster");
-const std::string PASSWORD("master");
-const std::string TOPIC("test/topic");
+const std::string CLIENT_ID = "MasterNodeSubscriber";
+const std::string USERNAME = "ppmaster";
+const std::string PASSWORD = "master";
+const std::string TOPIC = "commands/light";
+
+// Simple class to handle incoming messages
+class action_listener : public virtual mqtt::callback {
+public:
+    void connection_lost(const std::string& cause) override {
+        std::cout << "\nConnection lost: " << (cause.empty() ? "No Reason" : cause) << std::endl;
+    }
+
+    void message_arrived(mqtt::const_message_ptr msg) override {
+        std::cout << "------------------------------------------" << std::endl;
+        std::cout << "TOPIC: " << msg->get_topic() << std::endl;
+        std::cout << "PAYLOAD: " << msg->to_string() << std::endl;
+        std::cout << "QoS: " << msg->get_qos() << std::endl;
+        std::cout << "------------------------------------------" << std::endl;
+    }
+
+    void delivery_complete(mqtt::delivery_token_ptr tok) override {
+        // Not used for subscribers, but required by interface
+    }
+};
 
 int main() {
-    mqtt::async_client client(SERVER_ADDRESS, CLIENT_ID);
-
+    std::string SERVER_ADDRESS = "tcp://localhost:1883";
+    
+    mqtt::client client(SERVER_ADDRESS, CLIENT_ID);
     mqtt::connect_options connOpts;
-    connOpts.set_keep_alive_interval(20);
-    connOpts.set_clean_session(true);
+
+    // Set Authentication Options
     connOpts.set_user_name(USERNAME);
     connOpts.set_password(PASSWORD);
 
+    // Set the callback handler
+    action_listener listener;
+    client.set_callback(listener);
+
     try {
-        // Connect to EMQX broker
-        client.connect(connOpts)->wait();
+        std::cout << "Master Node connecting to broker..." << std::endl;
+        client.connect(connOpts);
         std::cout << "Connected to MQTT broker" << std::endl;
 
-        // Publish messages continuously
-        int message_count = 0;
-        std::cout << "Publishing messages every 5 seconds. Press Ctrl+C to exit." << std::endl;
-        
+        std::cout << "Subscribing to topic: " << TOPIC << std::endl;
+        client.subscribe(TOPIC, 1);
+
+        std::cout << "Listening for commands. Press Ctrl+C to exit." << std::endl;
+
+        // Keep the main thread alive to allow the client to receive messages
         while (true) {
-            std::string payload = "Hello from Master #" + std::to_string(message_count++);
-            mqtt::message_ptr pubmsg = mqtt::make_message(TOPIC, payload, 1, false);
-            client.publish(pubmsg)->wait();
-            std::cout << "Message published: " << payload << std::endl;
-            
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
-        // Disconnect (unreachable, but good practice)
-        client.disconnect()->wait();
-        std::cout << "Disconnected" << std::endl;
     } catch (const mqtt::exception& exc) {
-        std::cerr << "Error: " << exc.what() << std::endl;
+        std::cerr << "MQTT Error: " << exc.what() << std::endl;
         return 1;
     }
 
