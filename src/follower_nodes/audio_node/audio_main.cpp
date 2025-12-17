@@ -10,11 +10,11 @@
 
 #define SAMPLE_RATE 44100
 #define FRAMES_PER_BUFFER 2048
-#define CLAP_THRESHOLD 0.015f // Lowered for extremely quiet USB mic
+#define CLAP_THRESHOLD 0.6f // Calibrated for amplified USB mic
 #define MIN_CLAP_GAP_MS 100 // Minimum gap between claps (ms)
 #define MAX_CLAP_GAP_MS 800 // Maximum gap between claps (ms)
-#define SILENCE_THRESHOLD 0.008f // Lowered for quiet mic
-#define CLAP_MULTIPLIER 5.0f // Clap should be 5x louder than ambient noise
+#define SILENCE_THRESHOLD 0.06f // Above ambient noise floor
+#define CLAP_MULTIPLIER 27.0f // Clap should be 27x louder than ambient noise
 
 const std::string CLIENT_ID("AudioNodePublisher");
 const std::string USERNAME("ppaudionode");
@@ -22,7 +22,7 @@ const std::string PASSWORD("audio");
 const std::string TOPIC("commands/light");
 
 // Global ambient noise level (updated during operation)
-float g_ambientNoiseLevel = 0.005f;
+float g_ambientNoiseLevel = 0.025f; // Updated based on calibration
 
 // Single clap detection function with adaptive threshold
 bool detect_single_clap(PaStream* stream, std::vector<float>& buffer, float& peakAmplitude) {
